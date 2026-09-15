@@ -536,10 +536,26 @@ export default function PropertiesPage() {
         error
       )
 
+      const errorCode =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error
+          ? String((error as { code?: unknown }).code)
+          : ""
+
+      const errorMessage =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error
+          ? String((error as { message?: unknown }).message)
+          : error instanceof Error
+            ? error.message
+            : "Unable to save property."
+
       setPageError(
-        error instanceof Error
-          ? error.message
-          : "Unable to save property."
+        errorCode === "42501"
+          ? "Property could not be saved because Supabase Row Level Security is blocking this user. Add the properties INSERT policy in Supabase SQL Editor."
+          : errorMessage
       )
     } finally {
       setSaving(false)

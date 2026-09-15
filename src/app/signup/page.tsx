@@ -228,7 +228,7 @@ export default function SignupPage() {
             }}
             transition={{
               duration: 0.8,
-              ease: [0.22, 1, 0.36, 1],
+              ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
             }}
             className="relative z-20 w-full max-w-xl text-center"
           >
@@ -287,7 +287,7 @@ export default function SignupPage() {
             transition={{
               duration: 1,
               delay: 0.2,
-              ease: [0.22, 1, 0.36, 1],
+             ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
             }}
             className="relative mt-5 h-[270px] w-[440px]"
           >
@@ -464,7 +464,7 @@ export default function SignupPage() {
           }}
           transition={{
             duration: 0.8,
-            ease: [0.22, 1, 0.36, 1],
+        ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
           }}
           className="mx-auto w-full max-w-[410px]"
         >
