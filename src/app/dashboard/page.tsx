@@ -748,12 +748,8 @@ export default function DashboardPage() {
         onClose={() =>
           setSidebarOpen(false)
         }
-        displayName={displayName}
-        email={profile?.email}
-        initials={getInitials(
-          profile?.full_name
-        )}
-        onLogout={handleLogout}
+        
+      
       />
 
       {/* MAIN */}

@@ -1,6 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, motion } from "framer-motion"
@@ -10,7 +15,6 @@ import {
   Building2,
   Check,
   ChevronDown,
-  ChevronRight,
   Globe2,
   Home,
   Loader2,
@@ -21,7 +25,6 @@ import {
   RefreshCw,
   Search,
   Trash2,
-  Users,
   X,
 } from "lucide-react"
 
@@ -85,13 +88,27 @@ const EMPTY_FORM: PropertyForm = {
   status: "Active",
 }
 
+const PROPERTY_SELECT = `
+  id,
+  user_id,
+  name,
+  property_type,
+  address,
+  city,
+  country,
+  total_units,
+  status,
+  created_at
+`
+
 function getInitials(
   name: string | null | undefined
 ) {
-  if (!name) return "U"
+  if (!name?.trim()) return "U"
 
   return name
-    .split(" ")
+    .trim()
+    .split(/\s+/)
     .filter(Boolean)
     .map((word) => word[0])
     .join("")
@@ -100,11 +117,92 @@ function getInitials(
 }
 
 function formatDate(date: string) {
+  if (!date) return "—"
+
+  const parsed = new Date(date)
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "—"
+  }
+
   return new Intl.DateTimeFormat("en", {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(date))
+  }).format(parsed)
+}
+
+function getErrorMessage(
+  error: unknown,
+  fallback: string
+) {
+  if (
+    typeof error === "object" &&
+    error !== null
+  ) {
+    const maybeError = error as {
+      message?: unknown
+      details?: unknown
+      hint?: unknown
+      code?: unknown
+    }
+
+    if (
+      typeof maybeError.message === "string" &&
+      maybeError.message.trim()
+    ) {
+      return maybeError.message
+    }
+
+    if (
+      typeof maybeError.details === "string" &&
+      maybeError.details.trim()
+    ) {
+      return maybeError.details
+    }
+
+    if (
+      typeof maybeError.hint === "string" &&
+      maybeError.hint.trim()
+    ) {
+      return maybeError.hint
+    }
+
+    if (
+      typeof maybeError.code === "string" &&
+      maybeError.code.trim()
+    ) {
+      return `Supabase error (${maybeError.code}).`
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return fallback
+}
+
+function isRlsError(error: unknown) {
+  if (
+    typeof error !== "object" ||
+    error === null
+  ) {
+    return false
+  }
+
+  const maybeError = error as {
+    code?: unknown
+    message?: unknown
+  }
+
+  return (
+    maybeError.code === "42501" ||
+    (typeof maybeError.message === "string" &&
+      maybeError.message
+        .toLowerCase()
+        .includes("row-level security"))
+  )
 }
 
 export default function PropertiesPage() {
@@ -150,9 +248,9 @@ export default function PropertiesPage() {
     useState<Property | null>(null)
 
   const [form, setForm] =
-    useState<PropertyForm>(
-      EMPTY_FORM
-    )
+    useState<PropertyForm>({
+      ...EMPTY_FORM,
+    })
 
   const [saving, setSaving] =
     useState(false)
@@ -164,18 +262,30 @@ export default function PropertiesPage() {
     useState("")
 
   /*
-   * LOAD PROFILE + PROPERTIES
+   * LOAD DATA
    */
 
   const loadProperties = useCallback(
-    async () => {
+    async (
+      options?: {
+        silent?: boolean
+      }
+    ) => {
+      const silent =
+        options?.silent === true
+
       try {
+        if (!silent) {
+          setLoading(true)
+        }
+
         setPageError("")
 
         const {
           data: { user },
           error: authError,
-        } = await supabase.auth.getUser()
+        } =
+          await supabase.auth.getUser()
 
         if (authError) {
           throw authError
@@ -200,20 +310,7 @@ export default function PropertiesPage() {
 
           supabase
             .from("properties")
-            .select(
-              `
-                id,
-                user_id,
-                name,
-                property_type,
-                address,
-                city,
-                country,
-                total_units,
-                status,
-                created_at
-              `
-            )
+            .select(PROPERTY_SELECT)
             .eq("user_id", user.id)
             .order("created_at", {
               ascending: false,
@@ -221,8 +318,8 @@ export default function PropertiesPage() {
         ])
 
         if (profileResult.error) {
-          console.error(
-            "Profile:",
+          console.warn(
+            "Profile could not be loaded:",
             profileResult.error
           )
         }
@@ -231,22 +328,23 @@ export default function PropertiesPage() {
           throw propertiesResult.error
         }
 
-        setProfile(
+        const nextProfile =
           (profileResult.data as Profile | null) ||
-            {
-              id: user.id,
-              full_name:
-                user.user_metadata
-                  ?.full_name || null,
-              email:
-                user.email || null,
-            }
-        )
+          {
+            id: user.id,
+            full_name:
+              typeof user.user_metadata
+                ?.full_name === "string"
+                ? user.user_metadata.full_name
+                : null,
+            email: user.email || null,
+          }
 
-        setProperties(
-          (propertiesResult.data ||
-            []) as Property[]
-        )
+        const nextProperties =
+          (propertiesResult.data || []) as Property[]
+
+        setProfile(nextProfile)
+        setProperties(nextProperties)
       } catch (error) {
         console.error(
           "Properties page error:",
@@ -254,12 +352,16 @@ export default function PropertiesPage() {
         )
 
         setPageError(
-          error instanceof Error
-            ? error.message
-            : "Unable to load properties."
+          getErrorMessage(
+            error,
+            "Unable to load properties."
+          )
         )
       } finally {
-        setLoading(false)
+        if (!silent) {
+          setLoading(false)
+        }
+
         setRefreshing(false)
       }
     },
@@ -267,15 +369,67 @@ export default function PropertiesPage() {
   )
 
   useEffect(() => {
-    loadProperties()
+    void loadProperties()
   }, [loadProperties])
+
+  /*
+   * KEYBOARD CONTROLS
+   */
+
+  useEffect(() => {
+    function handleKeyDown(
+      event: KeyboardEvent
+    ) {
+      if (event.key !== "Escape") {
+        return
+      }
+
+      if (showModal && !saving) {
+        setShowModal(false)
+        setEditingProperty(null)
+        setForm({
+          ...EMPTY_FORM,
+        })
+      }
+
+      if (filterOpen) {
+        setFilterOpen(false)
+      }
+
+      if (profileOpen) {
+        setProfileOpen(false)
+      }
+    }
+
+    window.addEventListener(
+      "keydown",
+      handleKeyDown
+    )
+
+    return () => {
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown
+      )
+    }
+  }, [
+    showModal,
+    saving,
+    filterOpen,
+    profileOpen,
+  ])
 
   /*
    * REFRESH
    */
 
   async function handleRefresh() {
+    if (refreshing || loading) {
+      return
+    }
+
     setRefreshing(true)
+
     await loadProperties()
   }
 
@@ -284,31 +438,43 @@ export default function PropertiesPage() {
    */
 
   async function handleLogout() {
-    await supabase.auth.signOut()
-
-    router.replace("/login")
-    router.refresh()
+    try {
+      await supabase.auth.signOut()
+    } finally {
+      router.replace("/login")
+      router.refresh()
+    }
   }
 
   /*
-   * OPEN ADD MODAL
+   * ADD
    */
 
   function openAddModal() {
     setEditingProperty(null)
-    setForm(EMPTY_FORM)
+
+    setForm({
+      ...EMPTY_FORM,
+    })
+
     setPageError("")
     setSuccessMessage("")
+    setFilterOpen(false)
+    setProfileOpen(false)
     setShowModal(true)
   }
 
   /*
-   * OPEN EDIT MODAL
+   * EDIT
    */
 
   function openEditModal(
     property: Property
   ) {
+    if (saving || deletingId) {
+      return
+    }
+
     setEditingProperty(property)
 
     setForm({
@@ -323,16 +489,18 @@ export default function PropertiesPage() {
       country:
         property.country || "",
       total_units:
-        property.total_units !== null
-          ? String(property.total_units)
-          : "",
+        property.total_units === null ||
+        property.total_units === undefined
+          ? ""
+          : String(property.total_units),
       status:
-        property.status ||
-        "Active",
+        property.status || "Active",
     })
 
     setPageError("")
     setSuccessMessage("")
+    setFilterOpen(false)
+    setProfileOpen(false)
     setShowModal(true)
   }
 
@@ -341,15 +509,20 @@ export default function PropertiesPage() {
    */
 
   function closeModal() {
-    if (saving) return
+    if (saving) {
+      return
+    }
 
     setShowModal(false)
     setEditingProperty(null)
-    setForm(EMPTY_FORM)
+
+    setForm({
+      ...EMPTY_FORM,
+    })
   }
 
   /*
-   * FORM CHANGE
+   * FORM
    */
 
   function updateForm(
@@ -363,7 +536,7 @@ export default function PropertiesPage() {
   }
 
   /*
-   * SAVE PROPERTY
+   * SAVE
    */
 
   async function handleSaveProperty(
@@ -371,24 +544,41 @@ export default function PropertiesPage() {
   ) {
     event.preventDefault()
 
-    if (!form.name.trim()) {
+    if (saving) {
+      return
+    }
+
+    const propertyName =
+      form.name.trim()
+
+    if (!propertyName) {
       setPageError(
         "Property name is required."
       )
       return
     }
 
+    const rawUnits =
+      form.total_units.trim()
+
     const totalUnits =
-      form.total_units.trim() === ""
+      rawUnits === ""
         ? 0
-        : Number(form.total_units)
+        : Number(rawUnits)
 
     if (
       !Number.isInteger(totalUnits) ||
       totalUnits < 0
     ) {
       setPageError(
-        "Total units must be a valid number."
+        "Total units must be a whole number greater than or equal to 0."
+      )
+      return
+    }
+
+    if (totalUnits > 1000000) {
+      setPageError(
+        "Total units is too large."
       )
       return
     }
@@ -401,7 +591,8 @@ export default function PropertiesPage() {
       const {
         data: { user },
         error: authError,
-      } = await supabase.auth.getUser()
+      } =
+        await supabase.auth.getUser()
 
       if (authError) {
         throw authError
@@ -412,10 +603,11 @@ export default function PropertiesPage() {
         return
       }
 
-      const propertyPayload = {
-        name: form.name.trim(),
+      const payload = {
+        name: propertyName,
         property_type:
-          form.property_type || null,
+          form.property_type.trim() ||
+          null,
         address:
           form.address.trim() || null,
         city:
@@ -424,11 +616,11 @@ export default function PropertiesPage() {
           form.country.trim() || null,
         total_units: totalUnits,
         status:
-          form.status || "Active",
+          form.status.trim() || "Active",
       }
 
       /*
-       * EDIT
+       * UPDATE
        */
 
       if (editingProperty) {
@@ -437,7 +629,7 @@ export default function PropertiesPage() {
           error,
         } = await supabase
           .from("properties")
-          .update(propertyPayload)
+          .update(payload)
           .eq(
             "id",
             editingProperty.id
@@ -446,35 +638,18 @@ export default function PropertiesPage() {
             "user_id",
             user.id
           )
-          .select(
-            `
-              id,
-              user_id,
-              name,
-              property_type,
-              address,
-              city,
-              country,
-              total_units,
-              status,
-              created_at
-            `
-          )
-          .single()
+          .select(PROPERTY_SELECT)
+          .maybeSingle()
 
         if (error) {
           throw error
         }
 
-        setProperties(
-          (current) =>
-            current.map((property) =>
-              property.id ===
-              editingProperty.id
-                ? (data as Property)
-                : property
-            )
-        )
+        if (!data) {
+          throw new Error(
+            "Property was not found or you do not have permission to update it."
+          )
+        }
 
         setSuccessMessage(
           "Property updated successfully."
@@ -482,7 +657,7 @@ export default function PropertiesPage() {
       }
 
       /*
-       * CREATE
+       * INSERT
        */
 
       else {
@@ -493,85 +668,88 @@ export default function PropertiesPage() {
           .from("properties")
           .insert({
             user_id: user.id,
-            ...propertyPayload,
+            ...payload,
           })
-          .select(
-            `
-              id,
-              user_id,
-              name,
-              property_type,
-              address,
-              city,
-              country,
-              total_units,
-              status,
-              created_at
-            `
-          )
-          .single()
+          .select(PROPERTY_SELECT)
+          .maybeSingle()
 
         if (error) {
           throw error
         }
 
-        setProperties(
-          (current) => [
-            data as Property,
-            ...current,
-          ]
-        )
+        if (!data) {
+          throw new Error(
+            "Property was not created. Please check your Supabase INSERT policy."
+          )
+        }
 
         setSuccessMessage(
           "Property created successfully."
         )
       }
 
+      /*
+       * CLOSE FORM
+       */
+
       setShowModal(false)
       setEditingProperty(null)
-      setForm(EMPTY_FORM)
+
+      setForm({
+        ...EMPTY_FORM,
+      })
+
+      /*
+       * RELOAD REAL DATABASE DATA
+       *
+       * This keeps the page synchronized
+       * with Supabase.
+       */
+
+      await loadProperties({
+        silent: true,
+      })
     } catch (error) {
       console.error(
         "Save property error:",
         error
       )
 
-      const errorCode =
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error
-          ? String((error as { code?: unknown }).code)
-          : ""
-
-      const errorMessage =
-        typeof error === "object" &&
-        error !== null &&
-        "message" in error
-          ? String((error as { message?: unknown }).message)
-          : error instanceof Error
-            ? error.message
-            : "Unable to save property."
-
-      setPageError(
-        errorCode === "42501"
-          ? "Property could not be saved because Supabase Row Level Security is blocking this user. Add the properties INSERT policy in Supabase SQL Editor."
-          : errorMessage
-      )
+      if (isRlsError(error)) {
+        setPageError(
+          "Supabase Row Level Security blocked this action. Check the INSERT/UPDATE policy for the properties table."
+        )
+      } else {
+        setPageError(
+          getErrorMessage(
+            error,
+            "Unable to save property."
+          )
+        )
+      }
     } finally {
       setSaving(false)
     }
   }
 
   /*
-   * DELETE PROPERTY
+   * DELETE
    */
 
   async function handleDeleteProperty(
     property: Property
   ) {
-    const confirmed = window.confirm(
-      `Delete "${property.name}"? This action cannot be undone.`
-    )
+    if (
+      deletingId ||
+      saving
+    ) {
+      return
+    }
+
+    const confirmed =
+      window.confirm(
+        `Delete "${property.name}"?\n\nThis action cannot be undone.`
+      )
 
     if (!confirmed) {
       return
@@ -585,7 +763,8 @@ export default function PropertiesPage() {
       const {
         data: { user },
         error: authError,
-      } = await supabase.auth.getUser()
+      } =
+        await supabase.auth.getUser()
 
       if (authError) {
         throw authError
@@ -596,52 +775,64 @@ export default function PropertiesPage() {
         return
       }
 
-      const { error } =
-        await supabase
-          .from("properties")
-          .delete()
-          .eq(
-            "id",
-            property.id
-          )
-          .eq(
-            "user_id",
-            user.id
-          )
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("properties")
+        .delete()
+        .eq(
+          "id",
+          property.id
+        )
+        .eq(
+          "user_id",
+          user.id
+        )
+        .select("id")
 
       if (error) {
         throw error
       }
 
-      setProperties(
-        (current) =>
-          current.filter(
-            (item) =>
-              item.id !== property.id
-          )
-      )
+      if (!data || data.length === 0) {
+        throw new Error(
+          "Property was not deleted. Check your Supabase DELETE policy."
+        )
+      }
 
       setSuccessMessage(
         "Property deleted successfully."
       )
+
+      await loadProperties({
+        silent: true,
+      })
     } catch (error) {
       console.error(
         "Delete property error:",
         error
       )
 
-      setPageError(
-        error instanceof Error
-          ? error.message
-          : "Unable to delete property."
-      )
+      if (isRlsError(error)) {
+        setPageError(
+          "Supabase Row Level Security blocked deletion. Check the DELETE policy for the properties table."
+        )
+      } else {
+        setPageError(
+          getErrorMessage(
+            error,
+            "Unable to delete property."
+          )
+        )
+      }
     } finally {
       setDeletingId(null)
     }
   }
 
   /*
-   * FILTER PROPERTIES
+   * FILTER
    */
 
   const filteredProperties =
@@ -658,8 +849,14 @@ export default function PropertiesPage() {
               property.address,
               property.city,
               property.country,
+              property.status,
             ]
-              .filter(Boolean)
+              .filter(
+                (
+                  value
+                ): value is string =>
+                  Boolean(value)
+              )
               .join(" ")
               .toLowerCase()
 
@@ -669,16 +866,26 @@ export default function PropertiesPage() {
               query
             )
 
+          const currentStatus =
+            (
+              property.status ||
+              "Active"
+            ).toLowerCase()
+
           const matchesStatus =
             statusFilter === "All" ||
-            (property.status ||
-              "Active").toLowerCase() ===
+            currentStatus ===
               statusFilter.toLowerCase()
+
+          const currentType =
+            (
+              property.property_type ||
+              ""
+            ).toLowerCase()
 
           const matchesType =
             typeFilter === "All" ||
-            (property.property_type ||
-              "").toLowerCase() ===
+            currentType ===
               typeFilter.toLowerCase()
 
           return (
@@ -696,39 +903,47 @@ export default function PropertiesPage() {
     ])
 
   /*
-   * TOTAL UNITS
+   * STATS
    */
 
   const totalUnits =
     properties.reduce(
       (sum, property) =>
         sum +
-        Number(
-          property.total_units || 0
+        Math.max(
+          0,
+          Number(
+            property.total_units || 0
+          )
         ),
       0
     )
-
-  /*
-   * ACTIVE PROPERTIES
-   */
 
   const activeProperties =
     properties.filter(
       (property) =>
         !property.status ||
-        property.status.toLowerCase() ===
+        property.status
+          .toLowerCase() ===
           "active"
     ).length
 
-  /*
-   * PROFILE NAME
-   */
-
   const displayName =
-    profile?.full_name ||
+    profile?.full_name?.trim() ||
     profile?.email?.split("@")[0] ||
     "User"
+
+  const hasFilters =
+    Boolean(search.trim()) ||
+    statusFilter !== "All" ||
+    typeFilter !== "All"
+
+  function clearFilters() {
+    setSearch("")
+    setStatusFilter("All")
+    setTypeFilter("All")
+    setFilterOpen(false)
+  }
 
   return (
     <div className="min-h-screen bg-[#f7f8f6] text-[#111]">
@@ -759,13 +974,17 @@ export default function PropertiesPage() {
           <div className="flex items-center gap-3">
 
             <button
+              type="button"
               onClick={() =>
                 setSidebarOpen(true)
               }
               className="rounded-xl p-2 text-black/50 transition hover:bg-black/5 hover:text-black lg:hidden"
+              aria-label="Open sidebar"
             >
               <Menu size={19} />
             </button>
+
+            {/* DESKTOP SEARCH */}
 
             <div className="hidden items-center gap-2 rounded-xl border border-black/10 bg-[#f8f9f7] px-3 py-2 sm:flex">
 
@@ -783,7 +1002,21 @@ export default function PropertiesPage() {
                 }
                 placeholder="Search properties..."
                 className="w-[200px] bg-transparent text-xs outline-none placeholder:text-black/30"
+                aria-label="Search properties"
               />
+
+              {search && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSearch("")
+                  }
+                  className="text-black/30 transition hover:text-black"
+                  aria-label="Clear search"
+                >
+                  <X size={13} />
+                </button>
+              )}
 
             </div>
 
@@ -794,10 +1027,15 @@ export default function PropertiesPage() {
             {/* REFRESH */}
 
             <button
+              type="button"
               onClick={handleRefresh}
-              disabled={refreshing}
-              className="rounded-xl p-2.5 text-black/45 transition hover:bg-black/5 hover:text-black disabled:opacity-50"
-              title="Refresh"
+              disabled={
+                refreshing ||
+                loading
+              }
+              className="rounded-xl p-2.5 text-black/45 transition hover:bg-black/5 hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+              title="Refresh properties"
+              aria-label="Refresh properties"
             >
               <RefreshCw
                 size={17}
@@ -814,12 +1052,15 @@ export default function PropertiesPage() {
             <div className="relative">
 
               <button
+                type="button"
                 onClick={() =>
                   setProfileOpen(
-                    !profileOpen
+                    (current) =>
+                      !current
                   )
                 }
                 className="flex items-center gap-2 rounded-xl p-1.5 transition hover:bg-black/5"
+                aria-label="Open profile menu"
               >
 
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#173d25] text-[9px] font-bold text-white">
@@ -854,7 +1095,7 @@ export default function PropertiesPage() {
                       opacity: 0,
                       y: -8,
                     }}
-                    className="absolute right-0 top-12 w-[220px] overflow-hidden rounded-2xl border border-black/10 bg-white p-2 shadow-2xl"
+                    className="absolute right-0 top-12 z-50 w-[220px] overflow-hidden rounded-2xl border border-black/10 bg-white p-2 shadow-2xl"
                   >
 
                     <div className="border-b border-black/10 px-3 py-3">
@@ -864,7 +1105,8 @@ export default function PropertiesPage() {
                       </p>
 
                       <p className="truncate text-[10px] text-black/35">
-                        {profile?.email}
+                        {profile?.email ||
+                          "Account"}
                       </p>
 
                     </div>
@@ -894,6 +1136,7 @@ export default function PropertiesPage() {
                     </Link>
 
                     <button
+                      type="button"
                       onClick={
                         handleLogout
                       }
@@ -951,10 +1194,14 @@ export default function PropertiesPage() {
                   </div>
 
                   <button
+                    type="button"
                     onClick={() =>
-                      setSuccessMessage("")
+                      setSuccessMessage(
+                        ""
+                      )
                     }
                     className="rounded-lg p-1 hover:bg-black/5"
+                    aria-label="Dismiss success message"
                   >
                     <X size={14} />
                   </button>
@@ -980,26 +1227,29 @@ export default function PropertiesPage() {
                     opacity: 0,
                     y: -10,
                   }}
-                  className="mb-5 flex items-center justify-between rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700"
+                  className="mb-5 flex items-start justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700"
                 >
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 items-start gap-2">
 
                     <AlertCircle
                       size={15}
+                      className="mt-0.5 shrink-0"
                     />
 
-                    <span>
+                    <span className="break-words">
                       {pageError}
                     </span>
 
                   </div>
 
                   <button
+                    type="button"
                     onClick={() =>
                       setPageError("")
                     }
-                    className="rounded-lg p-1 hover:bg-red-100"
+                    className="shrink-0 rounded-lg p-1 hover:bg-red-100"
+                    aria-label="Dismiss error"
                   >
                     <X size={14} />
                   </button>
@@ -1008,7 +1258,7 @@ export default function PropertiesPage() {
               )}
             </AnimatePresence>
 
-            {/* PAGE HEADER */}
+            {/* HEADER */}
 
             <motion.div
               initial={{
@@ -1028,7 +1278,9 @@ export default function PropertiesPage() {
               <div>
 
                 <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[#173d25]">
-                  <Building2 size={14} />
+                  <Building2
+                    size={14}
+                  />
                   Property management
                 </div>
 
@@ -1037,15 +1289,16 @@ export default function PropertiesPage() {
                 </h1>
 
                 <p className="mt-2 max-w-xl text-sm leading-6 text-black/45">
-                  Manage every property from one
-                  place. Add buildings, update
-                  details, and keep your portfolio
-                  organized.
+                  Manage every property from
+                  one place. Add buildings,
+                  update details, and keep your
+                  portfolio organized.
                 </p>
 
               </div>
 
               <button
+                type="button"
                 onClick={openAddModal}
                 className="inline-flex w-fit items-center gap-2 rounded-xl bg-[#173d25] px-4 py-3 text-xs font-semibold text-white shadow-lg shadow-[#173d25]/10 transition hover:-translate-y-0.5 hover:shadow-xl"
               >
@@ -1061,27 +1314,38 @@ export default function PropertiesPage() {
 
               {[
                 {
-                  label: "Total Properties",
-                  value: properties.length,
+                  label:
+                    "Total Properties",
+                  value:
+                    properties.length,
                   icon: Building2,
                 },
                 {
-                  label: "Active Properties",
-                  value: activeProperties,
+                  label:
+                    "Active Properties",
+                  value:
+                    activeProperties,
                   icon: Check,
                 },
                 {
-                  label: "Total Units",
+                  label:
+                    "Total Units",
                   value: totalUnits,
                   icon: Home,
                 },
               ].map(
-                (item, index) => {
-                  const Icon = item.icon
+                (
+                  item,
+                  index
+                ) => {
+                  const Icon =
+                    item.icon
 
                   return (
                     <motion.div
-                      key={item.label}
+                      key={
+                        item.label
+                      }
                       initial={{
                         opacity: 0,
                         y: 15,
@@ -1092,7 +1356,8 @@ export default function PropertiesPage() {
                       }}
                       transition={{
                         delay:
-                          index * 0.06,
+                          index *
+                          0.06,
                       }}
                       className="rounded-2xl border border-black/10 bg-white p-5"
                     >
@@ -1100,7 +1365,9 @@ export default function PropertiesPage() {
                       <div className="flex items-center justify-between">
 
                         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#edf5ee] text-[#173d25]">
-                          <Icon size={16} />
+                          <Icon
+                            size={16}
+                          />
                         </div>
 
                         <span className="text-[9px] uppercase tracking-[0.12em] text-black/30">
@@ -1110,7 +1377,9 @@ export default function PropertiesPage() {
                       </div>
 
                       <p className="mt-5 text-[10px] font-medium uppercase tracking-[0.12em] text-black/35">
-                        {item.label}
+                        {
+                          item.label
+                        }
                       </p>
 
                       <p className="mt-1 text-2xl font-semibold tracking-tight">
@@ -1163,14 +1432,17 @@ export default function PropertiesPage() {
                     }
                     placeholder="Search by property, city, address..."
                     className="w-full bg-transparent text-xs outline-none placeholder:text-black/30"
+                    aria-label="Search properties"
                   />
 
                   {search && (
                     <button
+                      type="button"
                       onClick={() =>
                         setSearch("")
                       }
                       className="text-black/30 hover:text-black"
+                      aria-label="Clear search"
                     >
                       <X size={14} />
                     </button>
@@ -1183,25 +1455,36 @@ export default function PropertiesPage() {
                 <div className="relative">
 
                   <button
+                    type="button"
                     onClick={() =>
                       setFilterOpen(
-                        !filterOpen
+                        (current) =>
+                          !current
                       )
                     }
-                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-black/10 px-4 py-2.5 text-xs font-medium md:w-[180px]"
+                    className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-xs font-medium transition md:w-[180px] ${
+                      hasFilters
+                        ? "border-[#173d25]/20 bg-[#edf5ee] text-[#173d25]"
+                        : "border-black/10 hover:bg-black/[0.02]"
+                    }`}
+                    aria-expanded={
+                      filterOpen
+                    }
                   >
 
                     <span>
-                      Filters
+                      {hasFilters
+                        ? "Filters active"
+                        : "Filters"}
                     </span>
 
                     <ChevronDown
                       size={14}
-                      className={
+                      className={`transition ${
                         filterOpen
-                          ? "rotate-180 transition"
-                          : "transition"
-                      }
+                          ? "rotate-180"
+                          : ""
+                      }`}
                     />
 
                   </button>
@@ -1212,23 +1495,30 @@ export default function PropertiesPage() {
                         initial={{
                           opacity: 0,
                           y: -5,
+                          scale: 0.98,
                         }}
                         animate={{
                           opacity: 1,
                           y: 0,
+                          scale: 1,
                         }}
                         exit={{
                           opacity: 0,
                           y: -5,
+                          scale: 0.98,
                         }}
-                        className="absolute right-0 top-12 z-20 w-[240px] rounded-2xl border border-black/10 bg-white p-3 shadow-xl"
+                        className="absolute right-0 top-12 z-40 w-[250px] rounded-2xl border border-black/10 bg-white p-3 shadow-2xl"
                       >
 
-                        <div className="mb-3">
+                        <div className="mb-4">
 
-                          <p className="mb-2 text-[9px] font-semibold uppercase tracking-wider text-black/35">
-                            Status
-                          </p>
+                          <div className="mb-2 flex items-center justify-between">
+
+                            <p className="text-[9px] font-semibold uppercase tracking-wider text-black/35">
+                              Status
+                            </p>
+
+                          </div>
 
                           <div className="grid grid-cols-3 gap-1">
 
@@ -1236,8 +1526,11 @@ export default function PropertiesPage() {
                               "All",
                               ...STATUS_OPTIONS,
                             ].map(
-                              (status) => (
+                              (
+                                status
+                              ) => (
                                 <button
+                                  type="button"
                                   key={
                                     status
                                   }
@@ -1253,7 +1546,9 @@ export default function PropertiesPage() {
                                       : "bg-[#f7f8f6] text-black/50 hover:bg-black/5"
                                   }`}
                                 >
-                                  {status}
+                                  {
+                                    status
+                                  }
                                 </button>
                               )
                             )}
@@ -1269,13 +1564,19 @@ export default function PropertiesPage() {
                           </p>
 
                           <select
-                            value={typeFilter}
-                            onChange={(event) =>
+                            value={
+                              typeFilter
+                            }
+                            onChange={(
+                              event
+                            ) =>
                               setTypeFilter(
-                                event.target.value
+                                event
+                                  .target
+                                  .value
                               )
                             }
-                            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs outline-none"
+                            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs outline-none transition focus:border-[#173d25]/30"
                           >
 
                             <option value="All">
@@ -1283,12 +1584,20 @@ export default function PropertiesPage() {
                             </option>
 
                             {PROPERTY_TYPES.map(
-                              (type) => (
+                              (
+                                type
+                              ) => (
                                 <option
-                                  key={type}
-                                  value={type}
+                                  key={
+                                    type
+                                  }
+                                  value={
+                                    type
+                                  }
                                 >
-                                  {type}
+                                  {
+                                    type
+                                  }
                                 </option>
                               )
                             )}
@@ -1298,18 +1607,11 @@ export default function PropertiesPage() {
                         </div>
 
                         <button
-                          onClick={() => {
-                            setStatusFilter(
-                              "All"
-                            )
-                            setTypeFilter(
-                              "All"
-                            )
-                            setFilterOpen(
-                              false
-                            )
-                          }}
-                          className="mt-3 w-full rounded-xl border border-black/10 py-2 text-[10px] font-semibold text-black/50 hover:bg-black/5"
+                          type="button"
+                          onClick={
+                            clearFilters
+                          }
+                          className="mt-3 w-full rounded-xl border border-black/10 py-2.5 text-[10px] font-semibold text-black/50 transition hover:bg-black/5"
                         >
                           Clear Filters
                         </button>
@@ -1362,20 +1664,13 @@ export default function PropertiesPage() {
 
                 </div>
 
-                {(search ||
-                  statusFilter !== "All" ||
-                  typeFilter !== "All") && (
+                {hasFilters && (
                   <button
-                    onClick={() => {
-                      setSearch("")
-                      setStatusFilter(
-                        "All"
-                      )
-                      setTypeFilter(
-                        "All"
-                      )
-                    }}
-                    className="text-[10px] font-semibold text-[#173d25]"
+                    type="button"
+                    onClick={
+                      clearFilters
+                    }
+                    className="text-[10px] font-semibold text-[#173d25] hover:underline"
                   >
                     Clear filters
                   </button>
@@ -1400,11 +1695,10 @@ export default function PropertiesPage() {
                 </div>
               ) : filteredProperties.length ===
                 0 ? (
-                /* EMPTY */
-
                 <div className="px-6 py-16 text-center">
 
                   <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#edf5ee] text-[#173d25]">
+
                     {properties.length ===
                     0 ? (
                       <Building2
@@ -1415,6 +1709,7 @@ export default function PropertiesPage() {
                         size={21}
                       />
                     )}
+
                   </div>
 
                   <h3 className="text-sm font-semibold">
@@ -1434,223 +1729,259 @@ export default function PropertiesPage() {
                   </p>
 
                   {properties.length ===
-                    0 && (
+                  0 ? (
                     <button
+                      type="button"
                       onClick={
                         openAddModal
                       }
-                      className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#173d25] px-4 py-2.5 text-xs font-semibold text-white"
+                      className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#173d25] px-4 py-2.5 text-xs font-semibold text-white transition hover:-translate-y-0.5"
                     >
                       <Plus size={14} />
                       Add Property
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={
+                        clearFilters
+                      }
+                      className="mt-5 inline-flex items-center gap-2 rounded-xl border border-black/10 px-4 py-2.5 text-xs font-semibold text-black/60 transition hover:bg-black/5"
+                    >
+                      Clear filters
                     </button>
                   )}
 
                 </div>
               ) : (
-                /* PROPERTY CARDS */
-
                 <div className="divide-y divide-black/5">
 
                   {filteredProperties.map(
                     (
                       property,
                       index
-                    ) => (
-                      <motion.div
-                        key={
-                          property.id
-                        }
-                        initial={{
-                          opacity: 0,
-                          y: 10,
-                        }}
-                        animate={{
-                          opacity: 1,
-                          y: 0,
-                        }}
-                        transition={{
-                          delay:
-                            index *
-                            0.04,
-                        }}
-                        className="group p-4 transition hover:bg-[#fafbf9] sm:p-5"
-                      >
+                    ) => {
 
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+                      const isActive =
+                        !property.status ||
+                        property.status
+                          .toLowerCase() ===
+                          "active"
 
-                          {/* ICON */}
+                      return (
+                        <motion.div
+                          key={
+                            property.id
+                          }
+                          initial={{
+                            opacity: 0,
+                            y: 10,
+                          }}
+                          animate={{
+                            opacity: 1,
+                            y: 0,
+                          }}
+                          transition={{
+                            delay:
+                              index *
+                              0.04,
+                          }}
+                          className="group p-4 transition hover:bg-[#fafbf9] sm:p-5"
+                        >
 
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#173d25] text-white">
-                            <Building2
-                              size={19}
-                            />
-                          </div>
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
 
-                          {/* MAIN */}
+                            {/* ICON */}
 
-                          <div className="min-w-0 flex-1">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#173d25] text-white shadow-sm">
+                              <Building2
+                                size={19}
+                              />
+                            </div>
 
-                            <div className="flex flex-wrap items-center gap-2">
+                            {/* MAIN */}
+
+                            <div className="min-w-0 flex-1">
+
+                              <div className="flex flex-wrap items-center gap-2">
+
+                                <Link
+                                  href={`/dashboard/properties/${property.id}`}
+                                  className="truncate text-sm font-semibold transition hover:text-[#173d25]"
+                                >
+                                  {
+                                    property.name
+                                  }
+                                </Link>
+
+                                <span
+                                  className={`rounded-full px-2 py-1 text-[8px] font-semibold uppercase tracking-wide ${
+                                    isActive
+                                      ? "bg-[#edf5ee] text-[#173d25]"
+                                      : "bg-black/5 text-black/40"
+                                  }`}
+                                >
+                                  {
+                                    property.status ||
+                                      "Active"
+                                  }
+                                </span>
+
+                              </div>
+
+                              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+
+                                <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-black/40">
+
+                                  <MapPin
+                                    size={11}
+                                    className="shrink-0"
+                                  />
+
+                                  <span className="truncate">
+                                    {[
+                                      property.address,
+                                      property.city,
+                                      property.country,
+                                    ]
+                                      .filter(
+                                        Boolean
+                                      )
+                                      .join(
+                                        ", "
+                                      ) ||
+                                      "No location added"}
+                                  </span>
+
+                                </div>
+
+                                <div className="flex items-center gap-1.5 text-[10px] text-black/40">
+
+                                  <Home
+                                    size={11}
+                                  />
+
+                                  <span>
+                                    {property.total_units ??
+                                      0}{" "}
+                                    units
+                                  </span>
+
+                                </div>
+
+                                <div className="flex items-center gap-1.5 text-[10px] text-black/40">
+
+                                  <Building2
+                                    size={11}
+                                  />
+
+                                  <span>
+                                    {
+                                      property.property_type ||
+                                        "Property"
+                                    }
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+                            </div>
+
+                            {/* DATE */}
+
+                            <div className="hidden min-w-[100px] text-right lg:block">
+
+                              <p className="text-[9px] uppercase tracking-wider text-black/25">
+                                Added
+                              </p>
+
+                              <p className="mt-1 text-[10px] font-medium text-black/50">
+                                {formatDate(
+                                  property.created_at
+                                )}
+                              </p>
+
+                            </div>
+
+                            {/* ACTIONS */}
+
+                            <div className="flex items-center gap-2">
 
                               <Link
                                 href={`/dashboard/properties/${property.id}`}
-                                className="truncate text-sm font-semibold transition hover:text-[#173d25]"
+                                className="flex h-9 items-center gap-2 rounded-xl border border-black/10 px-3 text-[10px] font-semibold text-black/55 transition hover:border-[#173d25]/20 hover:bg-[#edf5ee] hover:text-[#173d25]"
                               >
-                                {
-                                  property.name
-                                }
+                                <span className="hidden sm:inline">
+                                  View
+                                </span>
+
+                                <ArrowUpRight
+                                  size={13}
+                                />
                               </Link>
 
-                              <span
-                                className={`rounded-full px-2 py-1 text-[8px] font-semibold uppercase tracking-wide ${
-                                  !property.status ||
-                                  property.status.toLowerCase() ===
-                                    "active"
-                                    ? "bg-[#edf5ee] text-[#173d25]"
-                                    : "bg-black/5 text-black/40"
-                                }`}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openEditModal(
+                                    property
+                                  )
+                                }
+                                disabled={
+                                  Boolean(
+                                    deletingId
+                                  ) ||
+                                  saving
+                                }
+                                className="flex h-9 w-9 items-center justify-center rounded-xl border border-black/10 text-black/45 transition hover:border-black/20 hover:bg-black/5 hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
+                                title="Edit property"
+                                aria-label={`Edit ${property.name}`}
                               >
-                                {property.status ||
-                                  "Active"}
-                              </span>
-
-                            </div>
-
-                            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-
-                              <div className="flex items-center gap-1.5 text-[10px] text-black/40">
-
-                                <MapPin
-                                  size={11}
+                                <Pencil
+                                  size={14}
                                 />
+                              </button>
 
-                                <span>
-                                  {[
-                                    property.address,
-                                    property.city,
-                                    property.country,
-                                  ]
-                                    .filter(
-                                      Boolean
-                                    )
-                                    .join(
-                                      ", "
-                                    ) ||
-                                    "No location added"}
-                                </span>
-
-                              </div>
-
-                              <div className="flex items-center gap-1.5 text-[10px] text-black/40">
-
-                                <Home
-                                  size={11}
-                                />
-
-                                <span>
-                                  {property.total_units ??
-                                    0}{" "}
-                                  units
-                                </span>
-
-                              </div>
-
-                              <div className="flex items-center gap-1.5 text-[10px] text-black/40">
-
-                                <Building2
-                                  size={11}
-                                />
-
-                                <span>
-                                  {property.property_type ||
-                                    "Property"}
-                                </span>
-
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleDeleteProperty(
+                                    property
+                                  )
+                                }
+                                disabled={
+                                  deletingId ===
+                                    property.id ||
+                                  Boolean(
+                                    deletingId
+                                  ) ||
+                                  saving
+                                }
+                                className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-100 text-red-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Delete property"
+                                aria-label={`Delete ${property.name}`}
+                              >
+                                {deletingId ===
+                                property.id ? (
+                                  <Loader2
+                                    size={14}
+                                    className="animate-spin"
+                                  />
+                                ) : (
+                                  <Trash2
+                                    size={14}
+                                  />
+                                )}
+                              </button>
 
                             </div>
 
                           </div>
 
-                          {/* DATE */}
-
-                          <div className="hidden min-w-[100px] text-right lg:block">
-
-                            <p className="text-[9px] uppercase tracking-wider text-black/25">
-                              Added
-                            </p>
-
-                            <p className="mt-1 text-[10px] font-medium text-black/50">
-                              {formatDate(
-                                property.created_at
-                              )}
-                            </p>
-
-                          </div>
-
-                          {/* ACTIONS */}
-
-                          <div className="flex items-center gap-2">
-
-                            <Link
-                              href={`/dashboard/properties/${property.id}`}
-                              className="flex h-9 items-center gap-2 rounded-xl border border-black/10 px-3 text-[10px] font-semibold text-black/55 transition hover:border-[#173d25]/20 hover:bg-[#edf5ee] hover:text-[#173d25]"
-                            >
-                              <span className="hidden sm:inline">
-                                View
-                              </span>
-                              <ArrowUpRight
-                                size={13}
-                              />
-                            </Link>
-
-                            <button
-                              onClick={() =>
-                                openEditModal(
-                                  property
-                                )
-                              }
-                              className="flex h-9 w-9 items-center justify-center rounded-xl border border-black/10 text-black/45 transition hover:border-black/20 hover:bg-black/5 hover:text-black"
-                              title="Edit property"
-                            >
-                              <Pencil
-                                size={14}
-                              />
-                            </button>
-
-                            <button
-                              onClick={() =>
-                                handleDeleteProperty(
-                                  property
-                                )
-                              }
-                              disabled={
-                                deletingId ===
-                                property.id
-                              }
-                              className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-100 text-red-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                              title="Delete property"
-                            >
-                              {deletingId ===
-                              property.id ? (
-                                <Loader2
-                                  size={14}
-                                  className="animate-spin"
-                                />
-                              ) : (
-                                <Trash2
-                                  size={14}
-                                />
-                              )}
-                            </button>
-
-                          </div>
-
-                        </div>
-
-                      </motion.div>
-                    )
+                        </motion.div>
+                      )
+                    }
                   )}
 
                 </div>
@@ -1670,7 +2001,6 @@ export default function PropertiesPage() {
               </p>
 
               <div className="flex gap-4">
-
                 <span>
                   Secure workspace
                 </span>
@@ -1678,7 +2008,6 @@ export default function PropertiesPage() {
                 <span>
                   Property management
                 </span>
-
               </div>
 
             </footer>
@@ -1715,6 +2044,8 @@ export default function PropertiesPage() {
           >
 
             <motion.div
+              role="dialog"
+              aria-modal="true"
               initial={{
                 opacity: 0,
                 scale: 0.96,
@@ -1734,6 +2065,9 @@ export default function PropertiesPage() {
                 duration: 0.2,
               }}
               className="max-h-[90vh] w-full max-w-[620px] overflow-y-auto rounded-3xl border border-black/10 bg-white shadow-2xl"
+              onMouseDown={(event) =>
+                event.stopPropagation()
+              }
             >
 
               {/* MODAL HEADER */}
@@ -1767,9 +2101,11 @@ export default function PropertiesPage() {
                 </div>
 
                 <button
+                  type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="rounded-xl p-2 text-black/35 transition hover:bg-black/5 hover:text-black disabled:opacity-50"
+                  className="rounded-xl p-2 text-black/35 transition hover:bg-black/5 hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="Close modal"
                 >
                   <X size={17} />
                 </button>
@@ -1789,12 +2125,17 @@ export default function PropertiesPage() {
 
                 <div className="mb-5">
 
-                  <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45">
+                  <label
+                    htmlFor="property-name"
+                    className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45"
+                  >
                     Property Name
                   </label>
 
                   <input
+                    id="property-name"
                     required
+                    autoFocus
                     value={form.name}
                     onChange={(event) =>
                       updateForm(
@@ -1814,17 +2155,19 @@ export default function PropertiesPage() {
 
                   <div>
 
-                    <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45">
+                    <label
+                      htmlFor="property-type"
+                      className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45"
+                    >
                       Property Type
                     </label>
 
                     <select
+                      id="property-type"
                       value={
                         form.property_type
                       }
-                      onChange={(
-                        event
-                      ) =>
+                      onChange={(event) =>
                         updateForm(
                           "property_type",
                           event.target.value
@@ -1832,7 +2175,6 @@ export default function PropertiesPage() {
                       }
                       className="w-full rounded-xl border border-black/10 bg-[#fafbf9] px-4 py-3 text-xs outline-none focus:border-[#173d25]/40 focus:bg-white"
                     >
-
                       {PROPERTY_TYPES.map(
                         (type) => (
                           <option
@@ -1843,24 +2185,25 @@ export default function PropertiesPage() {
                           </option>
                         )
                       )}
-
                     </select>
 
                   </div>
 
                   <div>
 
-                    <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45">
+                    <label
+                      htmlFor="property-status"
+                      className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45"
+                    >
                       Status
                     </label>
 
                     <select
+                      id="property-status"
                       value={
                         form.status
                       }
-                      onChange={(
-                        event
-                      ) =>
+                      onChange={(event) =>
                         updateForm(
                           "status",
                           event.target.value
@@ -1868,7 +2211,6 @@ export default function PropertiesPage() {
                       }
                       className="w-full rounded-xl border border-black/10 bg-[#fafbf9] px-4 py-3 text-xs outline-none focus:border-[#173d25]/40 focus:bg-white"
                     >
-
                       {STATUS_OPTIONS.map(
                         (status) => (
                           <option
@@ -1879,7 +2221,6 @@ export default function PropertiesPage() {
                           </option>
                         )
                       )}
-
                     </select>
 
                   </div>
@@ -1890,7 +2231,10 @@ export default function PropertiesPage() {
 
                 <div className="mb-5">
 
-                  <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45">
+                  <label
+                    htmlFor="property-units"
+                    className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45"
+                  >
                     Total Units
                   </label>
 
@@ -1902,9 +2246,12 @@ export default function PropertiesPage() {
                     />
 
                     <input
+                      id="property-units"
                       type="number"
                       min="0"
+                      max="1000000"
                       step="1"
+                      inputMode="numeric"
                       value={
                         form.total_units
                       }
@@ -1931,7 +2278,10 @@ export default function PropertiesPage() {
 
                 <div className="mb-5">
 
-                  <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45">
+                  <label
+                    htmlFor="property-address"
+                    className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45"
+                  >
                     Address
                   </label>
 
@@ -1943,6 +2293,7 @@ export default function PropertiesPage() {
                     />
 
                     <input
+                      id="property-address"
                       value={
                         form.address
                       }
@@ -1966,7 +2317,10 @@ export default function PropertiesPage() {
 
                   <div>
 
-                    <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45">
+                    <label
+                      htmlFor="property-city"
+                      className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45"
+                    >
                       City
                     </label>
 
@@ -1978,12 +2332,11 @@ export default function PropertiesPage() {
                       />
 
                       <input
+                        id="property-city"
                         value={
                           form.city
                         }
-                        onChange={(
-                          event
-                        ) =>
+                        onChange={(event) =>
                           updateForm(
                             "city",
                             event.target.value
@@ -1999,7 +2352,10 @@ export default function PropertiesPage() {
 
                   <div>
 
-                    <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45">
+                    <label
+                      htmlFor="property-country"
+                      className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-black/45"
+                    >
                       Country
                     </label>
 
@@ -2011,12 +2367,11 @@ export default function PropertiesPage() {
                       />
 
                       <input
+                        id="property-country"
                         value={
                           form.country
                         }
-                        onChange={(
-                          event
-                        ) =>
+                        onChange={(event) =>
                           updateForm(
                             "country",
                             event.target.value
@@ -2042,7 +2397,7 @@ export default function PropertiesPage() {
                       closeModal
                     }
                     disabled={saving}
-                    className="rounded-xl border border-black/10 px-5 py-3 text-xs font-semibold text-black/50 transition hover:bg-black/5 disabled:opacity-50"
+                    className="rounded-xl border border-black/10 px-5 py-3 text-xs font-semibold text-black/50 transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Cancel
                   </button>
@@ -2066,6 +2421,7 @@ export default function PropertiesPage() {
                         <Check
                           size={14}
                         />
+
                         {editingProperty
                           ? "Save Changes"
                           : "Create Property"}
