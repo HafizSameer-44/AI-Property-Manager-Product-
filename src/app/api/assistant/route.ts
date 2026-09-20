@@ -22,7 +22,6 @@ export async function POST(request: Request) {
       units: workspace.units?.length || 0,
       tenants: workspace.tenants?.length || 0,
       payments: workspace.payments?.length || 0,
-      maintenance: workspace.maintenance_requests?.length || 0,
     })
 
     return NextResponse.json({
