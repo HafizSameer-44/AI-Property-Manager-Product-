@@ -16,12 +16,10 @@ export async function POST(request: Request) {
     console.log("🤖 Assistant question:", question)
 
     const workspace = await getWorkspaceData()
-
     console.log("✅ Workspace loaded:", {
       properties: workspace.properties?.length || 0,
       units: workspace.units?.length || 0,
       tenants: workspace.tenants?.length || 0,
-      payments: workspace.payments?.length || 0,
     })
 
     return NextResponse.json({

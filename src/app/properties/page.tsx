@@ -490,7 +490,7 @@ export default function PropertiesPage() {
         property.country || "",
       total_units:
         property.total_units === null ||
-        property.total_units === undefined
+          property.total_units === undefined
           ? ""
           : String(property.total_units),
       status:
@@ -875,7 +875,7 @@ export default function PropertiesPage() {
           const matchesStatus =
             statusFilter === "All" ||
             currentStatus ===
-              statusFilter.toLowerCase()
+            statusFilter.toLowerCase()
 
           const currentType =
             (
@@ -886,7 +886,7 @@ export default function PropertiesPage() {
           const matchesType =
             typeFilter === "All" ||
             currentType ===
-              typeFilter.toLowerCase()
+            typeFilter.toLowerCase()
 
           return (
             matchesSearch &&
@@ -925,7 +925,7 @@ export default function PropertiesPage() {
         !property.status ||
         property.status
           .toLowerCase() ===
-          "active"
+        "active"
     ).length
 
   const displayName =
@@ -950,17 +950,10 @@ export default function PropertiesPage() {
 
       {/* SIDEBAR */}
 
+
       <Sidebar
         open={sidebarOpen}
-        onClose={() =>
-          setSidebarOpen(false)
-        }
-        displayName={displayName}
-        email={profile?.email}
-        initials={getInitials(
-          profile?.full_name
-        )}
-        onLogout={handleLogout}
+        onClose={() => setSidebarOpen(false)}
       />
 
       {/* MAIN */}
@@ -1071,11 +1064,10 @@ export default function PropertiesPage() {
 
                 <ChevronDown
                   size={13}
-                  className={`hidden text-black/30 transition sm:block ${
-                    profileOpen
+                  className={`hidden text-black/30 transition sm:block ${profileOpen
                       ? "rotate-180"
                       : ""
-                  }`}
+                    }`}
                 />
 
               </button>
@@ -1462,11 +1454,10 @@ export default function PropertiesPage() {
                           !current
                       )
                     }
-                    className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-xs font-medium transition md:w-[180px] ${
-                      hasFilters
+                    className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-xs font-medium transition md:w-[180px] ${hasFilters
                         ? "border-[#173d25]/20 bg-[#edf5ee] text-[#173d25]"
                         : "border-black/10 hover:bg-black/[0.02]"
-                    }`}
+                      }`}
                     aria-expanded={
                       filterOpen
                     }
@@ -1480,11 +1471,10 @@ export default function PropertiesPage() {
 
                     <ChevronDown
                       size={14}
-                      className={`transition ${
-                        filterOpen
+                      className={`transition ${filterOpen
                           ? "rotate-180"
                           : ""
-                      }`}
+                        }`}
                     />
 
                   </button>
@@ -1539,12 +1529,11 @@ export default function PropertiesPage() {
                                       status
                                     )
                                   }
-                                  className={`rounded-lg px-2 py-2 text-[10px] transition ${
-                                    statusFilter ===
-                                    status
+                                  className={`rounded-lg px-2 py-2 text-[10px] transition ${statusFilter ===
+                                      status
                                       ? "bg-[#173d25] font-semibold text-white"
                                       : "bg-[#f7f8f6] text-black/50 hover:bg-black/5"
-                                  }`}
+                                    }`}
                                 >
                                   {
                                     status
@@ -1656,7 +1645,7 @@ export default function PropertiesPage() {
                   <p className="mt-1 text-[10px] text-black/40">
                     {filteredProperties.length}{" "}
                     {filteredProperties.length ===
-                    1
+                      1
                       ? "property"
                       : "properties"}{" "}
                     shown
@@ -1700,7 +1689,7 @@ export default function PropertiesPage() {
                   <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#edf5ee] text-[#173d25]">
 
                     {properties.length ===
-                    0 ? (
+                      0 ? (
                       <Building2
                         size={23}
                       />
@@ -1714,7 +1703,7 @@ export default function PropertiesPage() {
 
                   <h3 className="text-sm font-semibold">
                     {properties.length ===
-                    0
+                      0
                       ? "No properties yet"
                       : "No properties found"}
                   </h3>
@@ -1722,14 +1711,14 @@ export default function PropertiesPage() {
                   <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-black/40">
 
                     {properties.length ===
-                    0
+                      0
                       ? "Add your first property to start managing your portfolio."
                       : "Try changing your search or filters."}
 
                   </p>
 
                   {properties.length ===
-                  0 ? (
+                    0 ? (
                     <button
                       type="button"
                       onClick={
@@ -1766,7 +1755,7 @@ export default function PropertiesPage() {
                         !property.status ||
                         property.status
                           .toLowerCase() ===
-                          "active"
+                        "active"
 
                       return (
                         <motion.div
@@ -1815,15 +1804,14 @@ export default function PropertiesPage() {
                                 </Link>
 
                                 <span
-                                  className={`rounded-full px-2 py-1 text-[8px] font-semibold uppercase tracking-wide ${
-                                    isActive
+                                  className={`rounded-full px-2 py-1 text-[8px] font-semibold uppercase tracking-wide ${isActive
                                       ? "bg-[#edf5ee] text-[#173d25]"
                                       : "bg-black/5 text-black/40"
-                                  }`}
+                                    }`}
                                 >
                                   {
                                     property.status ||
-                                      "Active"
+                                    "Active"
                                   }
                                 </span>
 
@@ -1878,7 +1866,7 @@ export default function PropertiesPage() {
                                   <span>
                                     {
                                       property.property_type ||
-                                        "Property"
+                                      "Property"
                                     }
                                   </span>
 
@@ -1952,7 +1940,7 @@ export default function PropertiesPage() {
                                 }
                                 disabled={
                                   deletingId ===
-                                    property.id ||
+                                  property.id ||
                                   Boolean(
                                     deletingId
                                   ) ||
@@ -1963,7 +1951,7 @@ export default function PropertiesPage() {
                                 aria-label={`Delete ${property.name}`}
                               >
                                 {deletingId ===
-                                property.id ? (
+                                  property.id ? (
                                   <Loader2
                                     size={14}
                                     className="animate-spin"
